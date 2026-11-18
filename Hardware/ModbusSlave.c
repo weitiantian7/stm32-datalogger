@@ -228,7 +228,7 @@ uint16_t ModbusSlave_ProcessFrame(
                  break;
 			}
 			
-			status=DataLogger_ReadBySequence(sequence,&record);
+			status= Storage_ReadHistory(sequence, &record, 1500U);
 			if(status==HAL_BUSY || status==HAL_TIMEOUT)
 			{
 				exception=6U;
@@ -280,7 +280,7 @@ uint16_t ModbusSlave_ProcessFrame(
 	{
 		response[0]=slaveAddress;
 		response[1]=(uint8_t)(function | 0x80U);//Modbus 规定：异常回复要把原功能码的最高位，也就是 bit7，设置为 1
-		response[2]=exception;// // 具体是什么异常
+		response[2]=exception;//具体是什么异常
 		
 		responseLength=3U;
 	}

@@ -9,7 +9,7 @@
 | Display | 1 | 256 word / 1024 B | 200 ms 周期，读取数据快照、更新 OLED 与蜂鸣器 |
 | Acquisition | 1 | 256 word / 1024 B | 200 ms 周期检查；SHT30 每秒读取；发布 ADC 与温湿度数据，投递日志请求 |
 | Storage | 1 | 256 word / 1024 B | 初始化 Flash，阻塞等待队列，处理日志、配置保存和历史读取请求 |
-| Modbus | 2 | 384 word / 1536 B | 等待帧结束通知，最长等待 100 ms；处理接收队列、寄存器读写与回复 |
+| Modbus | 2 | 384 word / 1536 B | 空闲时等待帧结束通知，等待超时为 100 ms；处理接收队列、寄存器读写与回复 |
 
 - I²C 互斥量协调 SHT30 与 OLED；传感器数据和设备配置各有快照访问接口。
 - 存储请求队列深度为 4，日志投递使用零等待，队列满时累计失败计数。
@@ -35,6 +35,21 @@
 
 CRC 和提交标记用于识别无效数据，不表示任意时刻断电都零丢失。恢复效果需以断电测试记录为准。
 
-## 历史读取的待确认路径
+## 历史读取的统一访问流程
 
-`Storage_ReadHistory()` 和存储任务的请求/回复队列已实现，但 `ModbusSlave.c` 中 0x41 分支当前直接调用 `DataLogger_ReadBySequence()`。这使 Modbus 任务可能与存储任务同时使用同一 Flash/SPI。发布前应考虑统一走存储任务的历史读取接口，并复测并发写入、读取超时和迟到回复；当前整理未改动该代码。
+`ModbusSlave.c` 的 0x41 分支调用 `Storage_ReadHistory(sequence, &record, 1500U)`，由接口向 `g_storageQueue` 投递 `STORAGE_REQUEST_HISTORY_READ` 请求。日志写入、配置保存与历史读取均交给 `StorageTask` 串行执行，Modbus 任务通过请求/回复队列获取记录。
+
+```text
+ModbusTask / 0x41
+  -> Storage_ReadHistory（记录序号 + 请求编号）
+  -> 存储请求队列
+  -> StorageTask -> DataLogger_ReadBySequence -> W25Q32
+  -> 历史回复队列（请求编号 + 状态 + 记录）
+  -> Storage_ReadHistory -> Modbus 响应
+```
+
+历史回复队列深度为 1。发起新请求前，接口清理队列残留回复；等待时仅接受请求编号匹配的结果，并按剩余超时预算继续等待，过滤迟到的旧回复。当前仅由 Modbus 任务调用该接口。
+
+0x41 的等待超时参数为 1500 ms。存储忙、请求投递失败返回 `HAL_BUSY`，等待超时返回 `HAL_TIMEOUT`；协议层将这两类情况转换为异常码 0x06，其他读取失败返回 0x04。1500 ms 是接口等待参数，不表示主站端实测响应时间保证。
+
+以上调用路径已按新版源码核对；日志写入与历史读取交错、超时后再次请求、迟到回复等行为的硬件测试结果仍需记录。
