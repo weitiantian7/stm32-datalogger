@@ -3,9 +3,7 @@
 #include "DeviceConfig.h"
 #include "ModbusCRC.h"
 #include "stddef.h"
-#include "DataLogger.h"
-
-
+#include "StorageTask.h"
 
 /* 把高字节在前的两个字节，组合成 uint16_t */
 static uint16_t Modbus_ReadU16BE(const uint8_t *data)//从字节数组中，按大端顺序读取两个字节，组合成一个无符号 16 位整数。
@@ -36,6 +34,8 @@ uint16_t ModbusSlave_ProcessFrame(
 	
 	ModbusRegResult_t result;//寄存器操作状态位
 	
+	DeviceConfig_t config;
+	
 	if(frame==NULL || response==NULL || frameLength<4U || frameLength>256U || responseCapacity<8U)
 	{
 		return 0U;
@@ -45,9 +45,14 @@ uint16_t ModbusSlave_ProcessFrame(
 	slaveAddress=frame[0];
 	function=frame[1];
 	
-	if(slaveAddress!=0U && slaveAddress !=DeviceConfig_Get()->SlaveAddress)
+	if(DeviceConfig_GetSnapshot(&config,NULL)==0U)
 	{
-		return 0;
+		return 0U;
+	}
+	
+	if(slaveAddress!=0 && slaveAddress!=config.SlaveAddress)
+	{
+		return 0U;
 	}
 	
 	response[0]=slaveAddress;
@@ -224,6 +229,12 @@ uint16_t ModbusSlave_ProcessFrame(
 			}
 			
 			status=DataLogger_ReadBySequence(sequence,&record);
+			if(status==HAL_BUSY || status==HAL_TIMEOUT)
+			{
+				exception=6U;
+				break;
+			}
+			
 			if(status!=HAL_OK)
 			{
 				exception=4U; /* 本阶段统一表示记录读取失败 */

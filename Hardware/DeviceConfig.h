@@ -11,9 +11,8 @@ typedef struct
 	uint16_t SlaveAddress;        // 从站地址
 }DeviceConfig_t;
 
-void DeviceConfig_Init(void);
-const DeviceConfig_t *DeviceConfig_Get(void);
-uint32_t DeviceConfig_GetRevision(void);
+uint8_t DeviceConfig_Init(void);
+uint8_t DeviceConfig_GetSnapshot(DeviceConfig_t *snapshot,uint32_t *revision);
 uint8_t DeviceConfig_Validate(const DeviceConfig_t *config);
 uint8_t DeviceConfig_Apply(const DeviceConfig_t *config);
 

@@ -197,6 +197,8 @@ HAL_StatusTypeDef AnalogInput_GetVoltage(float *Voltage1,float *Voltage2)
 }
 
 
+
+/*计算积累值*/
 static void AnalogInput_Accumulate(uint16_t raw1,uint16_t raw2)
 {
 	SampleSum1+=raw1;

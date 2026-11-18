@@ -18,7 +18,7 @@
 
 static uint32_t logAddress;
 static uint32_t logSequence;
-static DataLogger_State_t logState=DATA_LOGGER_STATE_NOT_READY;
+static volatile DataLogger_State_t logState=DATA_LOGGER_STATE_NOT_READY;
 
 
 

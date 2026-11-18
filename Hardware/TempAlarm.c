@@ -1,5 +1,6 @@
 #include "TempAlarm.h"
 #include "DeviceConfig.h"
+#include <stddef.h>
 
 
 static TempAlarm_State_t alarmState=TEMP_ALARM_STATE_NORMAL;
@@ -20,10 +21,18 @@ void TempAlarm_Init(void)
  */
 void TempAlarm_Update(float temperature)
 {
-	const DeviceConfig_t *config=DeviceConfig_Get();
+	DeviceConfig_t config;
 	
-	float triggerTemperature=(float)config->TemperatureLimitX100/100.0f;//获取报警温度
-	float hysteresis=(float)config->HysteresisX100/100.0f;//获取回差温度
+	float triggerTemperature;
+	float hysteresis;
+	
+	if(DeviceConfig_GetSnapshot(&config,NULL)==0U)//获取当前配置
+	{
+		return;
+	}
+	
+	triggerTemperature=(float)config.TemperatureLimitX100/100.0f;
+	hysteresis=(float)config.HysteresisX100/100.0f;
 	
 	if(alarmState==TEMP_ALARM_STATE_NORMAL)
 	{

@@ -38,3 +38,4 @@ HAL_StatusTypeDef DataLogger_Format(void);
 HAL_StatusTypeDef DataLogger_ReadBySequence(uint32_t Sequence,DataLogger_Record_t *Record);
 
 #endif
+

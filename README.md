@@ -1,69 +1,90 @@
-# STM32 数据采集与 Modbus 通信终端
+# STM32 + FreeRTOS 数据采集与 Modbus 通信终端
 
-基于 STM32F103C8 与 STM32 HAL 的裸机数据采集终端，实现温湿度及双路模拟量采集、OLED 显示、温度回差报警、RS485 Modbus 通信、SPI Flash 循环日志与参数保存。
+面向温湿度和双路模拟量监测的嵌入式终端：实时采集、OLED 显示、温度回差报警，通过 RS485 接收上位机读写请求，并将采集日志与设备配置保存到外部 SPI Flash。
 
-当前代码为 **裸机版 v1.0**，不使用 RTOS。系统在主循环中按时间片检查周期任务，通过中断、DMA 与环形缓冲区处理采样及串口接收；参数保存采用状态推进方式。
+当前源码目标为 **STM32F103C8 / Cortex-M3**，使用 **STM32 HAL、FreeRTOS 原生 API 和 Keil MDK**。工程原名保留为 `freeRTOSProject1`，方便直接打开现有工程。
 
-## 功能
+## 版本导航
 
-- SHT30 温湿度读取和 CRC-8 校验；主循环每秒检查采集，包含传感器故障与重新初始化路径。
-- TIM3 触发 ADC1 双通道扫描，DMA 循环搬运，累计窗口均值。
-- OLED 按 200 ms 间隔检查刷新；温度报警支持阈值、回差和蜂鸣器控制。
-- RS485 半双工 Modbus RTU 从站，支持 0x03、0x04、0x06、0x10 功能码，以及按序号读取历史记录的私有扩展 0x41。
-- W25Q32 循环日志，32 字节记录槽，包含 CRC、提交标记、写后回读和启动恢复逻辑。
-- A/B 双区配置保存；支持修改报警阈值、回差、日志间隔及从站地址，并显式保存。
+- 当前分支：FreeRTOS 版，包含采集、显示、存储与 Modbus 四个业务任务。
+- [裸机版 baremetal-v1.0](https://github.com/weitiantian7/stm32-datalogger/tree/baremetal-v1.0)：保留主循环调度版本及其原有 Keil 工程，可用于对照实现。
 
-以上说明来自源码实现，周期为配置目标；实测性能与稳定性应结合硬件验证。当前仓库暂未附测试报告、实物照片和演示视频。
+## 功能与实现
 
-## 默认参数
-
-| 参数 | 默认值 |
+| 功能 | 源码中的实现 |
 | --- | --- |
-| MCU | STM32F103C8 |
-| 外部 Flash | W25Q32，启动检查 JEDEC ID EF 40 16 |
-| Modbus 从站地址 | 1 |
-| 串口 | USART1，115200 bit/s，8N1 |
-| 温度上限 / 回差 | 31.00 ℃ / 1.00 ℃ |
-| 日志间隔 | 1 秒，可配置 1～60 秒 |
+| 温湿度 | SHT30，I²C 地址 0x44，每秒读取，分别校验温湿度 CRC-8 |
+| 模拟量 | ADC1 扫描通道 8/9，TIM3 TRGO 触发，DMA 循环搬运；每路 100 点形成均值窗口 |
+| 显示与报警 | OLED 共享 I²C1；显示任务按 200 ms 周期运行；温度上限与回差可配置，PB11 低电平触发蜂鸣器 |
+| 通信 | USART1 + RS485 半双工，115200 / 8N1；支持 0x03、0x04、0x06、0x10，含 CRC-16、异常响应及接收错误恢复路径 |
+| 日志 | W25Q32，32 字节记录槽，CRC、最后写入的提交标记、写后回读；按扇区循环覆盖，上电扫描恢复追加位置 |
+| 参数 | A/B 两个独立扇区，版本、代次、CRC、提交标记；显式触发保存，启动时选取有效配置 |
+| 多任务 | 采集、显示、存储、Modbus 四个业务任务；使用队列、互斥量、事件组及中断任务通知 |
 
-Flash 中已有有效配置时，启动恢复保存值，可能不同于上表。
+这些是源码实现说明。采样速率、刷新周期均为配置或调度目标，实际误差、响应时间、连续运行和断电恢复结果需结合硬件测试记录。当前资料未附实测报告、演示视频或接线照片。
 
-## 工程目录
+## 默认配置
+
+- 从站地址：1。
+- UART：115200 bit/s，8 数据位，无校验，1 停止位。
+- 温度报警阈值：31.00 ℃；回差：1.00 ℃。
+- 日志间隔：5 秒，可配置为 1～60 秒。
+- 系统时钟：内部 HSI 8 MHz；FreeRTOS tick：100 Hz；RTOS 堆配置：8 KiB。
+
+配置依据 `DeviceConfig.c`、`usart.c`、`main.c` 和 `FreeRTOSConfig.h`。Flash 中已有有效配置时，启动会恢复保存值。
+
+## 系统组织
 
 ```text
-Core/                         主循环、外设初始化和中断
-Hardware/                     传感器、OLED、Flash、日志和 Modbus 模块
-Drivers/                      STM32 HAL 与 CMSIS 依赖
-MDK-ARM/                      Keil 工程及启动文件
-STM32_DataLogger_F103.ioc      CubeMX 配置
+SHT30 / ADC + DMA -> AcquisitionTask -> SensorData 快照 -> DisplayTask -> OLED / 蜂鸣器
+                             |
+                             +-> 存储请求队列 -> StorageTask -> W25Q32 日志 / 配置
+
+PC 主站 <-> RS485 / USART1 <-> ModbusTask -> 寄存器 / 配置接口
 ```
 
-阅读入口为 `Core/Src/main.c`。日志和配置实现分别位于 `Hardware/DataLogger.c`、`Hardware/ConfigStore.c`，协议处理位于 `Hardware/ModbusSlave.c` 和 `Hardware/ModbusRegisters.c`。
+历史读取扩展 0x41 的当前调用路径及并发限制见 [协议说明](docs/protocol.md)，不要将其视为已完成并发验证的导出工具。
 
-## 编译与下载
+## 目录导航
 
-1. 安装 Keil MDK 和 STM32F1 设备包。现有工程记录 ARM Compiler 5.06 update 5（build 528）及 Keil.STM32F1xx_DFP.2.2.0，这是原工程元数据。
-2. 打开 `MDK-ARM/STM32_DataLogger_F103.uvprojx`。
-3. 确认器件、编译器和 SWD 调试器设置与本机及实物一致，执行 Rebuild。
-4. 下载到开发板，连接外设后，用 115200 / 8N1、从站地址 1 进行上位机联调。
+```text
+App/          四个业务任务、共享数据与资源
+Hardware/     传感器、Flash、协议、日志与参数模块
+Core/         HAL 外设初始化、中断、FreeRTOS 配置
+freeRTOS/     FreeRTOS 内核、Cortex-M3 移植与 heap_4
+Drivers/      STM32 HAL、CMSIS 核心与 STM32F1 设备支持
+MDK-ARM/      Keil 工程、启动文件与 RTE 配置
+docs/         接线、协议、任务设计与验收记录模板
+```
 
-本次整理已核对工程源文件与 IncludePath 目录是否存在，未在此环境执行 Keil 编译或硬件测试。
+阅读入口：`Core/Src/main.c` → `App/AcquisitionTask.c` / `App/ModbusTask.c` / `App/StorageTask.c` → `Hardware/` 中对应模块。
 
-## 主要引脚
+## 构建与下载
 
-| 功能 | 引脚 |
-| --- | --- |
-| I²C1，SHT30 / OLED | PB6 SCL、PB7 SDA |
-| SPI1，W25Q32 | PA5 SCK、PA6 MISO、PA7 MOSI、PA4 CS |
-| USART1，RS485 | PA9 TX、PA10 RX、PA11 收发方向 |
-| ADC1 双路输入 | PB0 通道8、PB1 通道9 |
-| 蜂鸣器控制 | PB11，当前代码低电平报警 |
-| SWD | PA13 SWDIO、PA14 SWCLK |
+1. 安装 Keil MDK 与 STM32F1 设备包。现有 `.uvprojx` 记录 ARM Compiler **5.06 update 5 build 528**、`Keil.STM32F1xx_DFP.2.2.0`；`.ioc` 记录 CubeMX **6.11.1**、STM32Cube F1 **1.8.7**。这是工程元数据，并非本次重新构建验证的版本组合。
+2. 打开 `MDK-ARM/freeRTOSProject1.uvprojx`，确认目标器件与实物一致，并选用工程对应的 ARM Compiler 5。
+3. 执行 Rebuild，记录编译结果和代码/RAM 占用。仓库保留所引用的源码和头文件，不需要复制原工程的 `.o`、`.axf` 等产物。
+4. 在调试设置中选择实际使用的 SWD 调试器，核对下载算法，下载到开发板。
+5. 按 [硬件接线](docs/hardware.md) 连接外设，上位机选择 115200 / 8N1、从站地址 1，先读取 8 个输入寄存器。
 
-引脚表由源码配置整理，接线需核对实际板卡和模块；外设共地，模拟输入限制在 0～VDDA。
+`.ioc` 用于保留配置来源。直接重新生成可能影响手工添加的 FreeRTOS、业务文件和工程配置，修改后应检查差异。首次复现优先打开现有 Keil 工程。
 
-## 版本说明
+本次仓库整理只进行了文件完整性与工程引用路径检查；未在本机执行 Keil 编译、烧录或硬件测试。
 
-本版本作为裸机实现保留，后续可继续提交 FreeRTOS 版本，用提交记录和版本标签展示演进。
+## 演示顺序
 
-本次整理保留原始源码字节内容，移除了编译输出、本机界面状态，以及本工程未引用的 CMSIS DSP/NN 示例和文档。第三方组件及源文件中的版权、许可声明予以保留；实际复用的 OLED、字库和驱动来源可在核实后补充。未另加全仓库统一许可证。
+1. 展示 OLED 的温湿度和两路电压，调整两路模拟输入并观察读数。
+2. 主站用 0x04 读实时数据，用 0x03 读配置。
+3. 用 0x06 修改温度阈值，演示报警触发与回差解除。
+4. 独立向保持寄存器 0x0004 写入 0xA55A，轮询保存状态；重启后核对参数。
+5. 演示传感器断开后的无效显示和恢复过程，保留实际结果。
+
+## 项目资料
+
+- [硬件与引脚](docs/hardware.md)
+- [通信协议与寄存器](docs/protocol.md)
+- [任务设计与存储布局](docs/architecture.md)
+- [验收记录模板及待确认事项](docs/validation.md)
+- [第三方组件说明](THIRD_PARTY.md)
+
+原始工程中的业务文件保持原字节内容。整理时移除了编译输出、本机界面状态，以及本工程未引用的 CMSIS DSP/NN 示例与文档；所需 HAL、CMSIS 核心、设备支持和原有许可证已保留。

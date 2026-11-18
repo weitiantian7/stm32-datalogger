@@ -1,32 +1,61 @@
 #include "DeviceConfig.h"
 #include <stddef.h>
+#include "FreeRTOS.h"
+#include "semphr.h"
+
 
 static DeviceConfig_t currentConfig;//设备配置，保存当前使用的参数。static 将它限制在本文件内，其他模块通过接口访问。
 static uint32_t configRevision=0U;//配置修订号。每次成功修改就加一，主循环据此判断是否需要更新报警和记录周期。
+static SemaphoreHandle_t configMutex=NULL;
 
-void DeviceConfig_Init(void)
+uint8_t DeviceConfig_Init(void)
 {
-	currentConfig.TemperatureLimitX100=3100; //温度上线
-	currentConfig.HysteresisX100=100U;       //回差
-	currentConfig.LogIntervalSeconds=1U;     //记录间隔，单位s
-	currentConfig.SlaveAddress=1U;           //从机地址
+	if(configMutex!=NULL)
+	{
+		return 1U;
+	}
 	
-	configRevision=1U;                       //配置修订号
+	configMutex=xSemaphoreCreateMutex();
+	if(configMutex==NULL)
+	{
+		return 0U;
+	}
+	
+	currentConfig.TemperatureLimitX100=3100;
+	currentConfig.HysteresisX100=100U;
+	currentConfig.LogIntervalSeconds=5U;
+	currentConfig.SlaveAddress=1U;
+	
+	configRevision=1U;
+	
+	return 1U;
 }
 
 
-
-const DeviceConfig_t *DeviceConfig_Get(void)//该地址指向的参数只读，不能修改
+uint8_t DeviceConfig_GetSnapshot(DeviceConfig_t *snapshot,uint32_t *revision)
 {
-	return &currentConfig;//返回保存当前参数结构体的地址
+	if(snapshot==NULL || configMutex==NULL)
+	{
+		return 0;
+	}
+	
+	if(xSemaphoreTake(configMutex,portMAX_DELAY)!=pdTRUE)
+	{
+		return 0U;
+	}
+	
+	*snapshot=currentConfig;
+	
+	if(revision!=NULL)
+	{
+		*revision=configRevision;
+	}
+	
+	xSemaphoreGive(configMutex);
+	
+	return 1U;
 }
 
-
-
-uint32_t DeviceConfig_GetRevision(void)
-{
-	return configRevision;//返回配置修订号
-}
 
 
 
@@ -65,13 +94,28 @@ uint8_t DeviceConfig_Validate(const DeviceConfig_t *config)//设备配置校验
 
 uint8_t DeviceConfig_Apply(const DeviceConfig_t *config)
 {
-	if(DeviceConfig_Validate(config)==0U)
+	DeviceConfig_t candidate;
+	
+	if(config==NULL || configMutex==NULL)
+	{
+		return 0U;
+	}
+	candidate=*config;
+	
+	if(DeviceConfig_Validate(&candidate)==0U)
 	{
 		return 0U;
 	}
 	
-	currentConfig=*config; //修改配置
-	configRevision++;      //配置修订号
+	if(xSemaphoreTake(configMutex,portMAX_DELAY)!=pdTRUE)
+	{
+		return 0U;
+	}
+	
+	currentConfig=candidate;
+	configRevision++;
+	
+	xSemaphoreGive(configMutex);
 	
 	return 1U;
 }

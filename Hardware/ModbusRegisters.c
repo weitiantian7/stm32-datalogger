@@ -2,7 +2,7 @@
 #include "DeviceConfig.h"
 #include "ConfigStore.h"
 #include "stm32f1xx_hal.h"
-
+#include "StorageTask.h"
 #include <stddef.h>
 
 #define MODBUS_INPUT_TIMEOUT_MS  2500U//输入超时
@@ -36,7 +36,7 @@ static uint32_t inputUpdateTick=0U;//最近一次更新输入数据缓存的时�
  */
 ModbusRegResult_t ModbusRegisters_ReadHolding(uint16_t startAddress,uint16_t quantity,uint16_t *values)
 {
-	const DeviceConfig_t *config;
+    DeviceConfig_t config;
 	uint16_t i;
 	uint16_t address;
 	
@@ -55,7 +55,10 @@ ModbusRegResult_t ModbusRegisters_ReadHolding(uint16_t startAddress,uint16_t qua
 		 return MODBUS_REG_ILLEGAL_ADDRESS;//地址或地址范围不存在
 	}
 	
-	config=DeviceConfig_Get();//获取设备配置结构体的地址
+	if(DeviceConfig_GetSnapshot(&config,NULL)==0U)//获取设备配置
+	{
+		return MODBUS_REG_DEVICE_FAILURE;
+	}
 	
 	for(i=0U;i<quantity;i++)
 	{
@@ -64,23 +67,23 @@ ModbusRegResult_t ModbusRegisters_ReadHolding(uint16_t startAddress,uint16_t qua
 		switch(address)
 		{
 			case 0U:
-				values[i]=(uint16_t)config->TemperatureLimitX100;
+				values[i]=(uint16_t)config.TemperatureLimitX100;
 			    break;
 			
 			case 1U:
-				values[i]=config->HysteresisX100;
+				values[i]=config.HysteresisX100;
 			    break;
 			
 			case 2U:
-				values[i]=config->LogIntervalSeconds;
+				values[i]=config.LogIntervalSeconds;
 			    break;
 			
 			case 3U:
-				values[i]=config->SlaveAddress;
+				values[i]=config.SlaveAddress;
 			    break;
 			
 			case 4U:
-				values[i]=(uint16_t)ConfigStore_GetState();//获取配置存储的状态
+				values[i]=(uint16_t)Storage_GetConfigSaveState();//获取配置存储的状态
 			    break;
 			
 			default:
@@ -120,7 +123,6 @@ ModbusRegResult_t ModbusRegisters_WriteHolding(uint16_t startAddress,uint16_t qu
 	DeviceConfig_t candidate;//设备配置参数
 	uint16_t i;
 	uint16_t address;
-	HAL_StatusTypeDef saveStatus;
 	
 	if(values==NULL || quantity==0U || quantity >123)
 	{
@@ -130,22 +132,24 @@ ModbusRegResult_t ModbusRegisters_WriteHolding(uint16_t startAddress,uint16_t qu
 	 /* 保存命令必须单独写，不能和配置参数混在一次写入中 */
 	if(startAddress==4U && quantity==1U)
 	{
+		HAL_StatusTypeDef saveStatus;
+		
 		if(values[0] != 0xA55AU)
 		{
 			return MODBUS_REG_ILLEGAL_VALUE;
 		}
 		
-		saveStatus=ConfigStore_RequestSave();//请求保存配置到FLASH
+		saveStatus=Storage_RequestConfigSave();
 		if(saveStatus==HAL_OK)
 		{
-			return MODBUS_REG_OK;
+			return MODBUS_REG_OK; 
 		}
 		
 		if(saveStatus==HAL_BUSY)
 		{
 			return MODBUS_REG_DEVICE_BUSY;
 		}
-		
+	
 		return MODBUS_REG_DEVICE_FAILURE;
 	}
 	
@@ -155,12 +159,15 @@ ModbusRegResult_t ModbusRegisters_WriteHolding(uint16_t startAddress,uint16_t qu
         return MODBUS_REG_ILLEGAL_ADDRESS;
     }
 	
-    if(ConfigStore_IsBusy()!=0U)
+    if(Storage_GetConfigSaveState()==CONFIG_STORE_BUSY)
 	{
 		return MODBUS_REG_DEVICE_BUSY;
 	}
 	
-	candidate=*DeviceConfig_Get();//获取当前设备配置
+	if(DeviceConfig_GetSnapshot(&candidate,NULL)==0)//获取当前设备配置
+	{
+		return MODBUS_REG_DEVICE_FAILURE;
+	}
 	
 	for(i=0U;i<quantity;i++)
 	{

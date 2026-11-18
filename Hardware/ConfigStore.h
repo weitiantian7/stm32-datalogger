@@ -2,6 +2,7 @@
 #define __CONFIG_STORE_H
 
 #include "stm32f1xx_hal.h"
+#include "DeviceConfig.h"
 
 typedef enum
 {
@@ -12,7 +13,7 @@ typedef enum
 }configStore_State_t;
 
 HAL_StatusTypeDef ConfigStore_Init(void);           //启动加载
-HAL_StatusTypeDef ConfigStore_RequestSave(void); //提交保存请求
+HAL_StatusTypeDef ConfigStore_RequestSave(const DeviceConfig_t *config); //提交保存请求
 void ConfigStore_Process(void);                  //主循环推进保存
 uint8_t ConfigStore_IsBusy(void);                //查询忙状态
 configStore_State_t ConfigStore_GetState(void);  //查询保存结果

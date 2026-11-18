@@ -3,8 +3,8 @@
  * Auto generated Run-Time-Environment Component Configuration File
  *      *** Do not modify ! ***
  *
- * Project: 'STM32_DataLogger_F103' 
- * Target:  'STM32_DataLogger_F103' 
+ * Project: 'freeRTOSProject1' 
+ * Target:  'freeRTOSProject1' 
  */
 
 #ifndef RTE_COMPONENTS_H

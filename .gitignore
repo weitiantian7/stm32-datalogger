@@ -1,5 +1,5 @@
-# Keil build output
-MDK-ARM/STM32_DataLogger_F103/
+# Keil generated build output (keep .uvprojx and startup sources)
+MDK-ARM/freeRTOSProject1/
 Objects/
 Listings/
 build/
@@ -18,7 +18,7 @@ Release/
 *.lnp
 *.build_log.htm
 
-# Local IDE settings and cache
+# Local IDE state and CubeMX cache
 *.uvguix.*
 *.uvgui.*
 *.uvopt
@@ -28,12 +28,12 @@ Release/
 *.tmp
 *.orig
 *.swp
-.vscode/
 .DS_Store
 Thumbs.db
 Desktop.ini
+.vscode/
 
-# Archives and videos belong outside source commits
+# Put release firmware and large demo videos in GitHub Releases.
 *.zip
 *.7z
 *.rar

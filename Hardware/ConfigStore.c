@@ -4,6 +4,7 @@
 #include "ModbusCRC.h"
 #include "W25Q32.h"
 
+
 #include <stddef.h>
 #include <string.h>
 
@@ -28,7 +29,7 @@ typedef struct
 /* 当前记录应为 24 字节，结构变化时让编译器报错 */
 typedef char ConfigRecordSizeCheck[sizeof(ConfigRecord_t)==24U?1:-1];//校验结构体是不是24字节
 
-static configStore_State_t storeState=CONFIG_STORE_IDLE;  // 配置保存状态机的当前状态，初始为空闲
+static volatile configStore_State_t storeState=CONFIG_STORE_IDLE;  // 配置保存状态机的当前状态，初始为空闲
 
 static uint8_t storeReady=0U;        // 配置存储模块就绪标志
 static uint8_t eraseStarted=0U;      // 擦除操作已启动标志
@@ -39,6 +40,7 @@ static uint32_t targetAddress=0U;    // 本次准备写入的扇区
 static uint32_t phaseTick=0;         // 当前阶段的计时起点，用于超时判断
  
 static ConfigRecord_t pendingRecord;  // 本次待保存的配置记录
+
 
 
 
@@ -133,8 +135,10 @@ HAL_StatusTypeDef ConfigStore_Init(void)
 
 
 /* 复制当前配置，提交保存请求；这里不执行 Flash 擦写 */
-HAL_StatusTypeDef ConfigStore_RequestSave(void)
+HAL_StatusTypeDef ConfigStore_RequestSave(const DeviceConfig_t *config)
 {
+	DeviceConfig_t snapshot;
+	
 	if(storeReady==0U || storeState==CONFIG_STORE_ERROR)
 	{
 		return HAL_ERROR;
@@ -145,7 +149,14 @@ HAL_StatusTypeDef ConfigStore_RequestSave(void)
 		return HAL_BUSY;
 	}
 	
-	if(DeviceConfig_Validate(DeviceConfig_Get())==0)
+	if(config==NULL)
+	{
+		return HAL_ERROR;
+	}
+	
+	snapshot=*config;
+	
+	if(DeviceConfig_Validate(&snapshot)==0)
 	{
 		return HAL_ERROR;
 	}
@@ -154,7 +165,7 @@ HAL_StatusTypeDef ConfigStore_RequestSave(void)
 	
 	pendingRecord.Magic=CONFIG_MAGIC;
 	pendingRecord.Generation=savedGeneration+1U;
-	pendingRecord.Config=*DeviceConfig_Get();
+	pendingRecord.Config=snapshot;
 	pendingRecord.Version=CONFIG_VERSION;
 	
 	pendingRecord.Crc=Modbus_CRC16((const uint8_t *)&pendingRecord,(uint16_t)offsetof(ConfigRecord_t,Crc));
@@ -297,10 +308,10 @@ configStore_State_t ConfigStore_GetState(void)
 	return storeState;
 }
 
-void ConfigStore_StopOnFault(void)
+void ConfigStore_StopOnFault(void)//故障时停止存储，置错误状态
 {
-	storeReady=0U;
-	storeState=CONFIG_STORE_ERROR;
+	storeReady=0U;//清除存储就绪标志
+	storeState=CONFIG_STORE_ERROR;//设置存储为错误状态
 }
 
 

@@ -1,5 +1,7 @@
 #include "W25Q32.h"
 #include "spi.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 
 /**
@@ -75,8 +77,15 @@ HAL_StatusTypeDef W25Q32_WriteEnable(void)
   *         HAL_TIMEOUT：等待超时
   *         其他值：SPI通信失败
   */
-HAL_StatusTypeDef W25Q32_WaitRead(uint32_t Timeout)
+HAL_StatusTypeDef W25Q32_WaitReady(uint32_t Timeout)
 {
+	static volatile uint32_t waitTimeoutCount = 0U;
+    static volatile uint32_t waitTimeoutLimitMs = 0U;
+    static volatile uint32_t waitTimeoutElapsedMs = 0U;
+    static volatile uint8_t waitTimeoutStatusReg = 0U;
+	
+	
+	
 	uint8_t cmd=0x05;
 	uint8_t sr=0;//状态寄存器
 	uint32_t start;
@@ -100,6 +109,11 @@ HAL_StatusTypeDef W25Q32_WaitRead(uint32_t Timeout)
 		
 		if(elapsed>=Timeout)
 		{
+			waitTimeoutCount++;
+            waitTimeoutLimitMs = Timeout;
+            waitTimeoutElapsedMs = elapsed;
+            waitTimeoutStatusReg = sr;
+			
 			status=HAL_TIMEOUT;
 			break;
 		}
@@ -111,10 +125,11 @@ HAL_StatusTypeDef W25Q32_WaitRead(uint32_t Timeout)
 			break;
 		}
 		
-		if((sr & 0x01)==0)
+		if((sr & 0x01)==0)//就绪时结束循环
 		{
 			break;
 		}
+		vTaskDelay(1);    // Flash 仍忙，等待一个 tick 后再检查
 	}
 	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_4,GPIO_PIN_SET);//拉高cs释放设备
 	
@@ -145,7 +160,7 @@ HAL_StatusTypeDef W25Q32_PageProgram(uint32_t Address,uint8_t *DataArray,uint16_
 		return HAL_ERROR;
 	}
 	
-	status=W25Q32_WaitRead(500);//确认芯片当前就绪,如果没就绪最大等待时间500ms
+	status=W25Q32_WaitReady(500);//确认芯片当前就绪,如果没就绪最大等待时间500ms
 	if(status!=HAL_OK)
 	{
 		return status;
@@ -178,7 +193,7 @@ HAL_StatusTypeDef W25Q32_PageProgram(uint32_t Address,uint8_t *DataArray,uint16_
 		return status;
 	}
 	
-	return W25Q32_WaitRead(100); // 等待本次页编程结束
+	return W25Q32_WaitReady(100); // 等待本次页编程结束
 	
 }
 
@@ -198,7 +213,7 @@ HAL_StatusTypeDef W25Q32_SectorErase(uint32_t Address)
 		return HAL_ERROR;
 	}
 	
-	status=W25Q32_WaitRead(500);//确认芯片当前就绪,如果没就绪最大等待时间500ms
+	status=W25Q32_WaitReady(500);//确认芯片当前就绪,如果没就绪最大等待时间500ms
 	if(status!=HAL_OK)
 	{
 		return status;
@@ -226,7 +241,7 @@ HAL_StatusTypeDef W25Q32_SectorErase(uint32_t Address)
 		return status;
 	}
 	
-	return W25Q32_WaitRead(500); // 等待本次扇区擦除完成
+	return W25Q32_WaitReady(500); // 等待本次扇区擦除完成
 }
 
 
@@ -252,7 +267,7 @@ HAL_StatusTypeDef W25Q32_ReadData(uint32_t Address,uint8_t *DataArray,uint32_t C
 		return HAL_ERROR;
 	}
 	
-	status=W25Q32_WaitRead(500); // 确认芯片当前就绪,防止芯片正在擦除或编程时，忽略普通读取指令。
+	status=W25Q32_WaitReady(500); // 确认芯片当前就绪,防止芯片正在擦除或编程时，忽略普通读取指令。
 	if(status!=HAL_OK)
 	{
 		return status;

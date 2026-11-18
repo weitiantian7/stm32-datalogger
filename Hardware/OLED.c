@@ -7,7 +7,7 @@
 #define OLED_I2C_TIMEOUT_MS 10U
 
 /* 本轮显示是否允许继续发送 */
-static uint8_t oledWriteAllowed=1U;
+static uint8_t oledWriteAllowed=1U; //Allowed：允许
 
 /* 每轮刷新开始时，允许重新尝试通信 */
 void OLED_BeginUpdate(void)
@@ -99,18 +99,20 @@ void OLED_Clear(void)
   */
 void OLED_ShowChar(uint8_t Line,uint8_t Column,char Char)
 {
-	uint8_t i;
-	OLED_SetCursor((Line-1)*2,(Column-1)*8);
-	for(i=0;i<8;i++)
-	{
-		OLED_WriteData(OLED_F8x16[Char-' '][i]);
-	}
-	OLED_SetCursor((Line-1)*2+1,(Column-1)*8);
-	for(i=0;i<8;i++)
-	{
-		OLED_WriteData(OLED_F8x16[Char-' '][i+8]);
-	}
+	uint8_t half;
+	uint8_t buf[9]={0x40}; //控制字节+8字节字模
 	
+	for(half=0U;half<2U;half++)
+	{
+		memcpy(&buf[1],&OLED_F8x16[Char - ' '][half*8U],8U);
+		
+		OLED_SetCursor((Line-1U)*2U+half,(Column-1U)*8U);
+		
+		if(OLED_Transmit(buf,sizeof(buf))!=HAL_OK)
+		{
+			return;
+		}
+	}
 }
 
 /**
