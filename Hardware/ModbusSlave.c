@@ -3,7 +3,7 @@
 #include "DeviceConfig.h"
 #include "ModbusCRC.h"
 #include "stddef.h"
-#include "StorageTask.h"
+#include "StorageTask.h" 
 
 /* 把高字节在前的两个字节，组合成 uint16_t */
 static uint16_t Modbus_ReadU16BE(const uint8_t *data)//从字节数组中，按大端顺序读取两个字节，组合成一个无符号 16 位整数。
@@ -262,6 +262,74 @@ uint16_t ModbusSlave_ProcessFrame(
 			responseLength=19U;/* 正文19字节，函数末尾统一追加CRC */
 			break;
 		}
+		
+		case 0x42:
+		{
+			uint32_t Lastestsequence;
+			DataLogger_Record_t record;
+			HAL_StatusTypeDef status;
+			uint16_t recordWords[8];
+			
+			/* 历史读取不响应广播 */
+			if(slaveAddress==0U)
+			{
+				return 0U;
+			}
+			
+			if(frameLength!=4U)
+			{
+				exception=3U;
+				break;
+			}
+			
+			Lastestsequence=DataLogger_GetLatestSequence();
+			if(Lastestsequence==0U || Lastestsequence==0xFFFFFFFFUL)
+			{
+				exception=4U;
+				break;
+			}
+			
+			if(responseCapacity<21U)
+			{
+				 exception = 4U;
+                 break;
+			}
+			
+			status= Storage_ReadHistory(Lastestsequence, &record, 1500U);
+			if(status==HAL_BUSY || status==HAL_TIMEOUT)
+			{
+				exception=6U;
+				break;
+			}
+			
+			if(status!=HAL_OK)
+			{
+				exception=4U; /* 本阶段统一表示记录读取失败 */
+				break;
+			}
+			
+			/* 将记录整理为8个16位数，高16位在前 */
+			recordWords[0]=(uint16_t)(record.Sequence>>16);
+			recordWords[1]=(uint16_t)record.Sequence;
+			recordWords[2]=(uint16_t)(record.TimeMs>>16);
+			recordWords[3]=(uint16_t)record.TimeMs;
+			recordWords[4]=(uint16_t)record.TemperatureX100;
+			recordWords[5]=record.HumidityX100;
+			recordWords[6]=record.Analog1;
+			recordWords[7]=record.Analog2;
+			
+			response[2]=16U;
+			
+			for(i=0U;i<8U;i++)
+			{
+				response[3U+i*2U]=(uint8_t)(recordWords[i]>>8);
+				response[4U+i*2U]=(uint8_t)recordWords[i];
+			}
+			
+			responseLength=19U;/* 正文19字节，函数末尾统一追加CRC */
+			break;
+		}
+		
 		
 		default:
 		{

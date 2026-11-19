@@ -36,6 +36,8 @@ HAL_StatusTypeDef DataLogger_AppendRecord(DataLogger_Record_t *Record);
 DataLogger_State_t DataLogger_GetState(void);
 HAL_StatusTypeDef DataLogger_Format(void);
 HAL_StatusTypeDef DataLogger_ReadBySequence(uint32_t Sequence,DataLogger_Record_t *Record);
+HAL_StatusTypeDef DataLogger_ReadLatest(DataLogger_Record_t *Record);
+uint32_t DataLogger_GetLatestSequence(void);
 
 #endif
 

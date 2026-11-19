@@ -5,6 +5,10 @@
 #include <stddef.h>      //使用offsetof
 #include <string.h>      //memset memcmp
 
+#include "FreeRTOS.h"
+#include "task.h"
+
+
 
 #define LOG_START_ADDRESS 0x000000UL            //起始地址
 #define LOG_SECTOR_SIZE 0x1000UL                // 每个扇区4096字节
@@ -18,6 +22,7 @@
 
 static uint32_t logAddress;
 static uint32_t logSequence;
+static uint32_t logLatestSequence;//最新一条成功保存的记录序号
 static volatile DataLogger_State_t logState=DATA_LOGGER_STATE_NOT_READY;
 
 
@@ -113,6 +118,7 @@ HAL_StatusTypeDef DataLogger_Init(void)
 	logState=DATA_LOGGER_STATE_NOT_READY;
 	logAddress=LOG_END_ADDRESS;
 	logSequence=0U;
+	logLatestSequence=0U;
 	
 	/* 1. 查找每个扇区的第一条有效记录，确定最新扇区 */
 	for(sectorAddress=LOG_START_ADDRESS;sectorAddress<LOG_END_ADDRESS;sectorAddress+=LOG_SECTOR_SIZE)
@@ -168,6 +174,8 @@ HAL_StatusTypeDef DataLogger_Init(void)
 		}
 	}
 	
+	/* 恢复最新有效记录的序号 */
+	logLatestSequence=maxSequence;
 	/* 3. 恢复下一条记录的序号和对应地址 */
 	logSequence=maxSequence+1U;
 	if(logSequence==0xFFFFFFFFUL)
@@ -377,6 +385,9 @@ HAL_StatusTypeDef DataLogger_AppendRecord(DataLogger_Record_t *Record)
 		return status;
 	}
 	
+	/* 写入及回读校验成功后，才更新最新序号 */
+	logLatestSequence=Record->Sequence;
+	
 	/* 4. 保存成功后，地址推进一个32字节槽位 */
 	logAddress+=LOG_SLOT_SIZE;
 	if(logAddress>=LOG_END_ADDRESS)
@@ -413,6 +424,7 @@ HAL_StatusTypeDef DataLogger_Format(void)//格式化日志区
 	uint32_t address;
 	
 	logState=DATA_LOGGER_STATE_NOT_READY;//先将存储模块设置为未就绪状态，防止有数据写入
+	logLatestSequence=0U;
 	
 	for(address=LOG_START_ADDRESS;address<LOG_END_ADDRESS;address+=LOG_SECTOR_SIZE)//从起始地址开始，一个扇区一个扇区的增加，将地址增加到模块最大地址
 	{
@@ -427,6 +439,32 @@ HAL_StatusTypeDef DataLogger_Format(void)//格式化日志区
 	return DataLogger_Init();
 }
 
+
+HAL_StatusTypeDef DataLogger_ReadLatest(DataLogger_Record_t *Record)//获取最新日志记录
+{
+	if(Record==NULL || logState!=DATA_LOGGER_STATE_READY || logLatestSequence==0U) 
+	{
+		return HAL_ERROR;
+	}
+	
+	return DataLogger_ReadBySequence(logLatestSequence,Record);
+}
+
+uint32_t DataLogger_GetLatestSequence(void)
+{
+	uint32_t sequenue=0U;
+	
+	taskENTER_CRITICAL();//进入临界区
+	
+	if(logState==DATA_LOGGER_STATE_READY)
+	{
+		sequenue=logLatestSequence;
+	}
+	
+	taskEXIT_CRITICAL();
+	
+	return sequenue;
+}
 
 
 /**

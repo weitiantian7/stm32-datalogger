@@ -238,7 +238,7 @@ static void Modbus_UpdataInputSnapshot(void)//更新输入数据快照
 	}
 	else if(Logstate==DATA_LOGGER_STATE_ERROR || ConfigState==CONFIG_STORE_ERROR)
 	{
-		input.Status |=MODBUS_STATUS_SENSOR_FAULT;//写入设备状态为错误
+		input.Status |=MODBUS_STATUS_STORAGE_FAULT;//写入设备状态为错误
 	}
 	
 	ModbusRegisters_UpdateInput(&input);//将数据更新到输入寄存器

@@ -56,6 +56,8 @@ void AcquisitionTask(void *pvParameters)
 	uint32_t logNowMs;
 	uint32_t logElapseMs;
 	
+	uint8_t sht30State=0U;
+	uint8_t shtBusyCount=0U;
 	
 	(void)pvParameters;
 	
@@ -66,6 +68,20 @@ void AcquisitionTask(void *pvParameters)
 	
 	for(;;)
 	{
+	    if(sht30State!=1U)
+	    {
+	    	if(xSemaphoreTake(g_i2cMutex,portMAX_DELAY)==pdTRUE)//申请I2C互斥锁
+			{
+				if(SHT30_Init()==HAL_OK)
+	       	    {
+	       	    	sht30State=1U;
+			    	shtBusyCount=0U;
+	       	    }
+				
+	    	    xSemaphoreGive(g_i2cMutex);//释放I2C互斥锁
+			}
+	    }
+		
 		now=xTaskGetTickCount();
 		
 		configSnapshotOK=DeviceConfig_GetSnapshot(&configSnapshot,NULL);//获取配置快照，以及配置序号  成功返回1
@@ -87,16 +103,29 @@ void AcquisitionTask(void *pvParameters)
 				
 		        if(status==HAL_OK)//判断温湿度获取成功
 		        {
+					shtBusyCount=0U;
 		        	sampleOKCount++;//采集成功+1
 					TempAlarm_Update(temperature);//根据最新采集温度更新温度警告
 					alarmActive=(TempAlarm_GetState()==TEMP_ALARM_STATE_HIGH)? 1U : 0U;//更新温度警告状态，报警状态返回1否则返回0。用于显示警告和操作蜂鸣器
 		        }
+				else if(status==HAL_BUSY)
+				{
+					if(++shtBusyCount>=3U)
+					{
+						shtBusyCount=0U;
+						sht30State=0U;
+					}
+				}	
 		        else if(status!=HAL_BUSY)
 		        {
+					sht30State=0U;
 		        	sampleErrorCount++;//采集失败+1
 		        }
 		    	
-		    	SensorData_Publish(temperature,humidity,(status==HAL_OK)? 1U : 0U,alarmActive);//发布温湿度传感器数据，根据驱动状态标记数据有效性，传入告警状态
+				if(status!=HAL_BUSY || sht30State==0U)
+				{
+					SensorData_Publish(temperature,humidity,(status==HAL_OK)? 1U : 0U,alarmActive);//发布温湿度传感器数据，根据驱动状态标记数据有效性，传入告警状态
+				}	
 		    }
 		}
 		

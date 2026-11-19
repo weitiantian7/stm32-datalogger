@@ -4,10 +4,12 @@
 #include "tim.h"
 
 #define ADC_SAMPLES_PER_WINDOW 100U
+#define ADC_DATA_TIMEOUT_MS 500U
 
 static volatile uint16_t Data[4];// DMA缓冲区   static将数组限制在当前模块内部，volatile提示编译器数据可能被DMA更新。
 static volatile uint16_t LatestData[2];// 最近一对完整结果
 static volatile uint8_t DataReady=0; // 采样完成标志
+static volatile uint32_t lastSampleTick=0U;
 
 /* 正在累计的窗口 */
 static volatile uint32_t SampleSum1=0U;
@@ -46,6 +48,7 @@ HAL_StatusTypeDef AnalogInput_Start(void)
 	SampleSum2=0U;
 	SampleCount=0U;
 	AverageReady=0U;
+	lastSampleTick=0U;
 	CompletedWindows=0;
 	
 	
@@ -90,6 +93,7 @@ HAL_StatusTypeDef AnalogInput_Start(void)
 HAL_StatusTypeDef AnalogInput_GetRaw(uint16_t *Data1,uint16_t *Data2)
 {
 	uint32_t primask;
+	uint32_t sampleTick;
 	uint16_t raw1;
 	uint16_t raw2;
 	
@@ -101,7 +105,7 @@ HAL_StatusTypeDef AnalogInput_GetRaw(uint16_t *Data1,uint16_t *Data2)
 	primask=__get_PRIMASK();//保存原中断状态
 	__disable_irq();//短暂禁止中断
 	
-	if(DataReady==0)//1表示采样完成
+	if(DataReady==0)//未取得第一次采样结果
 	{
 		__set_PRIMASK(primask);//恢复中断状态
 		return HAL_BUSY;
@@ -110,8 +114,14 @@ HAL_StatusTypeDef AnalogInput_GetRaw(uint16_t *Data1,uint16_t *Data2)
 	 /* 防止读到一半时，回调更新了这对结果 */
 	raw1=LatestData[0];//将DMA获取到的最新数据写入到临时变量中
 	raw2=LatestData[1];
+	sampleTick=lastSampleTick;
 	
-	__set_PRIMASK(primask);
+	__set_PRIMASK(primask);//恢复中断
+	
+	if((uint32_t)(HAL_GetTick()-sampleTick)>=ADC_DATA_TIMEOUT_MS)
+	{
+		return HAL_TIMEOUT;
+	}
 	
 	*Data1=raw1;
 	*Data2=raw2;
@@ -231,6 +241,7 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc)//获取半字中断
 		
 		AnalogInput_Accumulate(LatestData[0],LatestData[1]);
 		
+		lastSampleTick=HAL_GetTick();
 		DataReady=1;
 	}	
 }
@@ -246,6 +257,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)//获取字中断
 		
 		AnalogInput_Accumulate(LatestData[0],LatestData[1]);
 		
+		lastSampleTick=HAL_GetTick();
 		DataReady=1;
 	}
 }

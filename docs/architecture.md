@@ -18,6 +18,8 @@
 - 当前 ADC 均值累计发生在 DMA 回调中，采集任务读取完成窗口。不要写成“DMA 回调只发送通知”。
 - TIM3 时基配置名义每路采样率为 100 Hz；是否达到该速率需统计 DMA 数据和丢失情况。
 - 工程设 RTOS tick 为 100 Hz，一个 tick 为 10 ms。`vTaskDelay(1)` 代表一个 tick。
+- SHT30 初始化已从启动流程移到采集任务，通过 I²C 互斥量执行；读取出错后重新初始化，连续 3 次忙状态也会触发重新初始化。实际断线恢复时间需实测。
+- ADC DMA 回调更新最近采样时间；实时数据对超过 500 ms 未更新时，读取接口返回 `HAL_TIMEOUT`。
 
 ## 外部 Flash
 
@@ -37,10 +39,10 @@ CRC 和提交标记用于识别无效数据，不表示任意时刻断电都零�
 
 ## 历史读取的统一访问流程
 
-`ModbusSlave.c` 的 0x41 分支调用 `Storage_ReadHistory(sequence, &record, 1500U)`，由接口向 `g_storageQueue` 投递 `STORAGE_REQUEST_HISTORY_READ` 请求。日志写入、配置保存与历史读取均交给 `StorageTask` 串行执行，Modbus 任务通过请求/回复队列获取记录。
+`ModbusSlave.c` 的 0x41 与 0x42 分支调用 `Storage_ReadHistory(sequence, &record, 1500U)`，由接口向 `g_storageQueue` 投递 `STORAGE_REQUEST_HISTORY_READ` 请求。日志写入、配置保存与历史读取均交给 `StorageTask` 串行执行，Modbus 任务通过请求/回复队列获取记录。
 
 ```text
-ModbusTask / 0x41
+ModbusTask / 0x41 指定序号，或 0x42 获取最新已保存序号
   -> Storage_ReadHistory（记录序号 + 请求编号）
   -> 存储请求队列
   -> StorageTask -> DataLogger_ReadBySequence -> W25Q32
@@ -50,6 +52,14 @@ ModbusTask / 0x41
 
 历史回复队列深度为 1。发起新请求前，接口清理队列残留回复；等待时仅接受请求编号匹配的结果，并按剩余超时预算继续等待，过滤迟到的旧回复。当前仅由 Modbus 任务调用该接口。
 
-0x41 的等待超时参数为 1500 ms。存储忙、请求投递失败返回 `HAL_BUSY`，等待超时返回 `HAL_TIMEOUT`；协议层将这两类情况转换为异常码 0x06，其他读取失败返回 0x04。1500 ms 是接口等待参数，不表示主站端实测响应时间保证。
+0x41 与 0x42 的等待超时参数为 1500 ms。存储忙、请求投递失败返回 `HAL_BUSY`，等待超时返回 `HAL_TIMEOUT`；协议层将这两类情况转换为异常码 0x06，其他读取失败返回 0x04。1500 ms 是接口等待参数，不表示主站端实测响应时间保证。
+
+## 最新记录序号
+
+`DataLogger` 维护最新已保存记录的序号：初始化时清零，启动扫描有效记录后恢复为最大有效序号；追加记录通过写入、提交及回读验证后才更新；格式化时清零。
+
+0x42 在临界区内通过 `DataLogger_GetLatestSequence()` 读取序号快照，这一步只读取内存元数据。随后仍经 `Storage_ReadHistory()` 请求存储任务执行 Flash 读取，无需新增存储请求类型。若等待期间新增记录，本次回复仍对应先前选中的序号。
+
+`DataLogger_ReadLatest()` 是新增的底层读取接口；当前 0x42 路径没有调用它。应用层历史读取继续走存储任务，避免绕过统一 Flash 访问路径。
 
 以上调用路径已按新版源码核对；日志写入与历史读取交错、超时后再次请求、迟到回复等行为的硬件测试结果仍需记录。

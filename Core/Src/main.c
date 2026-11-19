@@ -120,7 +120,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   
   OLED_Init();
-  SHT30_Init();
+  
   
   if(DeviceConfig_Init()==0U)
   {
