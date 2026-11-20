@@ -22,7 +22,7 @@
 | 参数 | A/B 两个独立扇区，版本、代次、CRC、提交标记；显式触发保存，启动时选取有效配置 |
 | 多任务 | 采集、显示、存储、Modbus 四个业务任务；日志写入、配置保存与历史读取统一经队列交给存储任务；使用互斥量、事件组及中断任务通知 |
 
-这些是源码实现说明。采样速率、刷新周期均为配置或调度目标，实际误差、响应时间、连续运行和断电恢复结果需结合硬件测试记录。当前资料未附实测报告、演示视频或接线照片。
+这些是源码实现说明。仓库已附历史日志 CSV 导出工具与三份原始导出记录，其中一份含 1000 条连续序号记录，详见 [测试记录](docs/test-records/history-export/README.md)。采样速率、刷新周期均为配置或调度目标，实际误差、响应时间、连续运行和断电恢复等指标仍需对应的实测记录；演示视频与接线照片尚未纳入仓库。
 
 ## 默认配置
 
@@ -44,7 +44,7 @@ SHT30 / ADC + DMA -> AcquisitionTask -> SensorData 快照 -> DisplayTask -> OLED
 PC 主站 <-> RS485 / USART1 <-> ModbusTask -> 寄存器 / 配置接口
 ```
 
-历史读取扩展 0x41 与 0x42 均通过 `Storage_ReadHistory()` 提交请求，由 `StorageTask` 统一执行 Flash 读取，使用回复队列和请求编号匹配结果。0x42 先取得最新已保存记录的序号快照，再读取该序号对应的记录；它返回的是日志记录，实时数据通过 0x04 读取。请求格式、等待超时与异常响应见 [协议说明](docs/protocol.md)。当前提供单条历史读取的固件接口，尚未附 CSV 批量导出上位机工具。
+历史读取扩展 0x41 与 0x42 均通过 `Storage_ReadHistory()` 提交请求，由 `StorageTask` 统一执行 Flash 读取，使用回复队列和请求编号匹配结果。0x42 先取得最新已保存记录的序号快照，再读取该序号对应的记录；它返回的是日志记录，实时数据通过 0x04 读取。请求格式、等待超时与异常响应见 [协议说明](docs/protocol.md)。配套 [CSV 导出工具](tools/history-export/README.md) 通过 0x41 按指定范围逐条读取，可导出多条记录；当前工具尚未接入 0x42 自动获取最新序号。
 
 ## 目录导航
 
@@ -56,6 +56,7 @@ freeRTOS/     FreeRTOS 内核、Cortex-M3 移植与 heap_4
 Drivers/      STM32 HAL、CMSIS 核心与 STM32F1 设备支持
 MDK-ARM/      Keil 工程、启动文件与 RTE 配置
 docs/         接线、协议、任务设计与验收记录模板
+tools/        Windows PowerShell 历史日志 CSV 导出工具
 ```
 
 阅读入口：`Core/Src/main.c` → `App/AcquisitionTask.c` / `App/ModbusTask.c` / `App/StorageTask.c` → `Hardware/` 中对应模块。
@@ -70,7 +71,7 @@ docs/         接线、协议、任务设计与验收记录模板
 
 `.ioc` 用于保留配置来源。直接重新生成可能影响手工添加的 FreeRTOS、业务文件和工程配置，修改后应检查差异。首次复现优先打开现有 Keil 工程。
 
-2026-11-19 在独立目录对当前发布源码执行 Keil Rebuild：**0 Error(s), 0 Warning(s)**；Code 38870 B、RO-data 2370 B、RW-data 460 B、ZI-data 13700 B。详见 [构建记录](docs/build-2026-11-19.md)。未执行烧录或硬件测试。
+2026-11-19 在独立目录对当前发布源码执行 Keil Rebuild：**0 Error(s), 0 Warning(s)**；Code 38870 B、RO-data 2370 B、RW-data 460 B、ZI-data 13700 B。详见 [构建记录](docs/build-2026-11-19.md)。当次整理未执行烧录或硬件测试；后续用户提供的实机导出资料见 [历史日志测试记录](docs/test-records/history-export/README.md)。
 
 ## 演示顺序
 
@@ -87,6 +88,8 @@ docs/         接线、协议、任务设计与验收记录模板
 - [通信协议与寄存器](docs/protocol.md)
 - [任务设计与存储布局](docs/architecture.md)
 - [验收记录模板及待确认事项](docs/validation.md)
+- [历史日志 CSV 导出工具](tools/history-export/README.md)
+- [原始 CSV 与 1000 条导出核对记录](docs/test-records/history-export/README.md)
 - [第三方组件说明](THIRD_PARTY.md)
 
 原始工程中的业务文件保持原字节内容。整理时移除了编译输出、本机界面状态，以及本工程未引用的 CMSIS DSP/NN 示例与文档；所需 HAL、CMSIS 核心、设备支持和原有许可证已保留。

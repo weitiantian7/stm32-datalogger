@@ -1,0 +1,2 @@
+﻿sequence,uptime_ms,temperature_c,humidity_rh_pct,adc1_raw,adc2_raw,reference_mv,adc1_mv,adc2_mv,status,error_code,error_message
+17614,7320,27.52,77.05,1035,90,3300,834,73,ok,,
